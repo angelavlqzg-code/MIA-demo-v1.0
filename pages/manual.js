@@ -52,10 +52,10 @@ export default function Manual() {
             {/* Intro */}
             <div className="man-intro-box">
               <p>Este manual es la guía de referencia del Agente Líder de MIA. Explica qué es, cómo funciona, en qué se basa cada decisión y cómo usar la librería de prompts.</p>
-              <p style={{marginTop: 8}}>Está escrito para dos audiencias: <strong>Isai (FWD)</strong> para construir la lógica técnica, y <strong>Ricardo</strong> para validar que la lógica replicada es fiel a su metodología.</p>
+              <p style={{marginTop: 8}}>Está escrito para dos audiencias: <strong>El equipo de desarrollo</strong> para construir la lógica técnica, y <strong>el Founder Estratégico</strong> para validar que la lógica replicada es fiel a su metodología.</p>
               <div className="man-criterio">
                 <span className="man-criterio-label">Criterio de aprobación</span>
-                Ricardo puede leerlo y confirmar que, si no estuviera en la empresa, este manual sería suficiente para que alguien más genere los planes que él generaría.
+                El Founder Estratégico puede leerlo y confirmar que, si no estuviera en la empresa, este manual sería suficiente para que alguien más genere los planes que él generaría.
               </div>
             </div>
 
@@ -63,8 +63,8 @@ export default function Manual() {
             <section id="que-es">
               <h2>1. Qué es el Agente Líder</h2>
               <p>El Agente Líder es el núcleo de MIA. Es la IA que genera el plan semanal personalizado de marketing para cada cliente.</p>
-              <p>No es un chatbot de preguntas y respuestas. No es un generador de contenido genérico. Es un sistema de diagnóstico + priorización que replica el razonamiento estratégico de un director de marketing con experiencia real — específicamente el de Ricardo, Founder Estratégico de BOXER TTL.</p>
-              <div className="man-highlight">El Agente Líder hace cada lunes lo que Ricardo haría: diagnostica primero, luego prioriza, luego genera el plan.</div>
+              <p>No es un chatbot de preguntas y respuestas. No es un generador de contenido genérico. Es un sistema de diagnóstico + priorización que replica el razonamiento estratégico de un director de marketing con experiencia real — específicamente el de un director de marketing senior con experiencia real en agencias.</p>
+              <div className="man-highlight">El Agente Líder hace cada lunes lo que el Founder Estratégico haría: diagnostica primero, luego prioriza, luego genera el plan.</div>
               <div className="man-formula">
                 <div className="man-formula-pill">Arquetipo del cliente</div>
                 <span className="man-formula-op">+</span>
@@ -150,7 +150,7 @@ export default function Manual() {
             {/* 3 */}
             <section id="variables">
               <h2>3. Las 12 variables de decisión del lunes</h2>
-              <p>Ricardo no prioriza tareas — prioriza diagnósticos. Antes de decir qué hacer esta semana, evalúa el estado de estas variables. El Agente Líder replica ese diagnóstico.</p>
+              <p>El sistema no prioriza tareas — prioriza diagnósticos. Antes de decir qué hacer esta semana, evalúa el estado de estas variables. El Agente Líder replica ese diagnóstico.</p>
 
               <h3>Las 9 variables base</h3>
               <div className="man-table-wrap">
@@ -352,7 +352,7 @@ export default function Manual() {
                   ['Las instrucciones son ejecutables sin asesor externo','Una persona sin experiencia de marketing puede seguirlas'],
                   ['El tono pasa el filtro de frases SÍ/NO','Verificar contra la lista de prohibidos del MIA-SYS-001'],
                   ['Sin anglicismos sin contexto','Búsqueda de KPI, insights, engagement, awareness'],
-                  ['Ricardo califica el plan ≥ 4/5','Ejecutable por pyme MX + tono MX + instrucciones claras'],
+                  ['El Founder califica el plan ≥ 4/5','Ejecutable por pyme MX + tono MX + instrucciones claras'],
                 ].map(([c, v]) => (
                   <div className="man-check-row" key={c}>
                     <div className="man-check-box">✓</div>
