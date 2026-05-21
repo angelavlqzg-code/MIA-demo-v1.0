@@ -4,86 +4,89 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
   const { nombre, industria, descripcion, situacion, canales, objetivo } = req.body || {}
-
   if (!nombre || !industria || !descripcion) {
-    return res.status(400).json({ error: 'Faltan campos requeridos: nombre, industria, descripcion' })
+    return res.status(400).json({ error: 'Faltan campos requeridos.' })
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY
   if (!apiKey) return res.status(500).json({ error: 'API key no configurada.' })
 
-  // Try models in order until one works
-  const models = [
-    'claude-opus-4-6',
-    'claude-sonnet-4-6',
-    'claude-haiku-4-5-20251001',
-    'claude-3-5-sonnet-20241022',
-    'claude-3-5-haiku-20241022',
-    'claude-3-haiku-20240307',
-    'claude-3-sonnet-20240229',
-    'claude-3-opus-20240229',
-  ]
+  // Fetch available models first
+  let availableModel = null
+  try {
+    const modelsRes = await fetch('https://api.anthropic.com/v1/models', {
+      headers: { 'x-api-key': apiKey, 'anthropic-version': '2023-06-01' }
+    })
+    if (modelsRes.ok) {
+      const modelsData = await modelsRes.json()
+      const models = modelsData?.data || []
+      // Prefer sonnet > haiku > anything else
+      const preferred = ['sonnet', 'haiku', 'opus']
+      for (const pref of preferred) {
+        const found = models.find(m => m.id.toLowerCase().includes(pref))
+        if (found) { availableModel = found.id; break }
+      }
+      if (!availableModel && models.length > 0) availableModel = models[0].id
+      if (!availableModel) {
+        return res.status(502).json({ 
+          error: `Tu workspace no tiene modelos disponibles. Modelos encontrados: ${JSON.stringify(models.map(m=>m.id))}` 
+        })
+      }
+    }
+  } catch(e) {
+    // Models endpoint failed — try fallback
+  }
+
+  // Fallback if models endpoint didn't work
+  if (!availableModel) availableModel = 'claude-3-haiku-20240307'
 
   const systemPrompt = `Eres MIA — Marketing Intelligence Agent. Socio estratégico de marketing de ${nombre}.
 IDENTIDAD: Cercano como colega. Directo como director. Comprometido como socio.
 LOS 4 ARQUETIPOS:
-1 — La marca que ya existe pero no ejecuta: Presencia activa pero marketing caótico.
-2 — El negocio invisible: Producto bueno, nadie lo conoce. Sin historial de marketing.
-3 — El líder que no comunica: Empresa grande que no aprovecha su historia.
-4 — El vendedor B2B sin sistema: Ventas dependientes de relaciones personales del dueño.
-REGLA DE ORO: Diagnóstico antes que receta. Responde SIEMPRE en español mexicano natural.`
+1 — La marca que ya existe pero no ejecuta. 2 — El negocio invisible. 3 — El líder que no comunica. 4 — El vendedor B2B sin sistema.
+Responde SIEMPRE en español mexicano natural.`
 
-  const userPrompt = `Analiza este negocio. Responde SOLO con JSON válido, sin texto extra, sin backticks, sin explicaciones:
-{"arquetipo":1,"arquetipo_nombre":"nombre","diagnostico":"2-3 oraciones","variables":[{"nombre":"Variable","valor":"valor","impacto":"impacto"}],"plan":{"apertura":"Esta semana la ganamos si...","prioridades":[{"titulo":"Título","que":"Qué hacer","por_que":"Por qué","como":["Paso 1","Paso 2","Paso 3"]}],"cierre":"Cierre motivador"}}
+  const userPrompt = `Analiza este negocio. Responde ÚNICAMENTE con JSON válido (sin backticks, sin texto extra):
+{"arquetipo":1,"arquetipo_nombre":"nombre","diagnostico":"2-3 oraciones","variables":[{"nombre":"v","valor":"v","impacto":"i"}],"plan":{"apertura":"Esta semana la ganamos si...","prioridades":[{"titulo":"t","que":"q","por_que":"p","como":["1","2","3"]}],"cierre":"c"}}
+Negocio: ${nombre} | Industria: ${industria} | Qué vende: ${descripcion} | Situación: ${situacion||'n/a'} | Canales: ${canales||'n/a'} | Objetivo: ${objetivo||'n/a'}
+3 prioridades exactas, 3-4 variables. Solo JSON.`
 
-Negocio: ${nombre}
-Industria: ${industria}
-Descripción: ${descripcion}
-Situación: ${situacion || 'No especificada'}
-Canales: ${canales || 'No especificados'}
-Objetivo 90 días: ${objetivo || 'No especificado'}
+  try {
+    const response = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+      },
+      body: JSON.stringify({
+        model: availableModel,
+        max_tokens: 2000,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      }),
+    })
 
-IMPORTANTE: Exactamente 3 prioridades, 3-4 variables. Solo JSON, nada más.`
+    const data = await response.json()
 
-  for (const model of models) {
-    try {
-      const response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': apiKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 2500,
-          system: systemPrompt,
-          messages: [{ role: 'user', content: userPrompt }],
-        }),
+    if (!response.ok) {
+      return res.status(502).json({ 
+        error: `Error del modelo (${availableModel}): ${data?.error?.message || response.status}` 
       })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        // Model not found — try next
-        if (data?.error?.type === 'not_found_error') continue
-        return res.status(502).json({ error: `Error API: ${data?.error?.message || response.status}` })
-      }
-
-      const text = data.content?.map(i => i.text || '').join('') || ''
-      const clean = text.replace(/```json|```/g, '').trim()
-
-      try {
-        const parsed = JSON.parse(clean)
-        return res.status(200).json({ ...parsed, _model: model })
-      } catch {
-        // Bad JSON from this model — try next
-        continue
-      }
-    } catch (err) {
-      continue
     }
-  }
 
-  return res.status(502).json({ error: 'Ningún modelo disponible respondió correctamente. Verifica tu API key y los modelos habilitados en tu workspace.' })
+    const text = data.content?.map(i => i.text || '').join('') || ''
+    const jsonMatch = text.match(/\{[\s\S]*\}/)
+    if (!jsonMatch) {
+      return res.status(422).json({ 
+        error: `Respuesta no válida del modelo ${availableModel}. Intenta de nuevo.` 
+      })
+    }
+
+    const parsed = JSON.parse(jsonMatch[0])
+    return res.status(200).json({ ...parsed, _model: availableModel })
+
+  } catch (err) {
+    return res.status(500).json({ error: `Error: ${err.message}` })
+  }
 }
