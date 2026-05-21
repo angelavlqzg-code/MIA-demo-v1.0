@@ -10,75 +10,80 @@ export default async function handler(req, res) {
   }
 
   const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
-    return res.status(500).json({ error: 'API key no configurada en el servidor.' })
-  }
+  if (!apiKey) return res.status(500).json({ error: 'API key no configurada.' })
+
+  // Try models in order until one works
+  const models = [
+    'claude-opus-4-6',
+    'claude-sonnet-4-6',
+    'claude-haiku-4-5-20251001',
+    'claude-3-5-sonnet-20241022',
+    'claude-3-5-haiku-20241022',
+    'claude-3-haiku-20240307',
+    'claude-3-sonnet-20240229',
+    'claude-3-opus-20240229',
+  ]
 
   const systemPrompt = `Eres MIA — Marketing Intelligence Agent. Socio estratégico de marketing de ${nombre}.
-
 IDENTIDAD: Cercano como colega. Directo como director. Comprometido como socio.
-
 LOS 4 ARQUETIPOS:
-1 — La marca que ya existe pero no ejecuta: Presencia activa, marketing caótico o inconsistente.
+1 — La marca que ya existe pero no ejecuta: Presencia activa pero marketing caótico.
 2 — El negocio invisible: Producto bueno, nadie lo conoce. Sin historial de marketing.
-3 — El líder que no comunica: Empresa grande que no aprovecha su historia para vender más.
+3 — El líder que no comunica: Empresa grande que no aprovecha su historia.
 4 — El vendedor B2B sin sistema: Ventas dependientes de relaciones personales del dueño.
+REGLA DE ORO: Diagnóstico antes que receta. Responde SIEMPRE en español mexicano natural.`
 
-REGLA DE ORO: Diagnóstico antes que receta. Responde SIEMPRE en español mexicano natural.
-TONO SÍ: "Esta semana la ganamos si..." / Directo, concreto, comprometido.
-TONO NO: Anglicismos sin contexto, lenguaje corporativo frío, promesas sin sustento.`
-
-  const userPrompt = `Analiza este negocio y responde SOLO en JSON válido, sin texto adicional ni backticks:
-{"arquetipo":1,"arquetipo_nombre":"nombre","diagnostico":"2-3 oraciones concretas","variables":[{"nombre":"Variable","valor":"valor","impacto":"cómo afecta"}],"plan":{"apertura":"Esta semana la ganamos si...","prioridades":[{"titulo":"Título","que":"Qué hacer","por_que":"Por qué es prioritario","como":["Paso 1","Paso 2","Paso 3"]}],"cierre":"Frase de cierre"}}
+  const userPrompt = `Analiza este negocio. Responde SOLO con JSON válido, sin texto extra, sin backticks, sin explicaciones:
+{"arquetipo":1,"arquetipo_nombre":"nombre","diagnostico":"2-3 oraciones","variables":[{"nombre":"Variable","valor":"valor","impacto":"impacto"}],"plan":{"apertura":"Esta semana la ganamos si...","prioridades":[{"titulo":"Título","que":"Qué hacer","por_que":"Por qué","como":["Paso 1","Paso 2","Paso 3"]}],"cierre":"Cierre motivador"}}
 
 Negocio: ${nombre}
 Industria: ${industria}
 Descripción: ${descripcion}
-Situación actual: ${situacion || 'No especificada'}
-Canales activos: ${canales || 'No especificados'}
+Situación: ${situacion || 'No especificada'}
+Canales: ${canales || 'No especificados'}
 Objetivo 90 días: ${objetivo || 'No especificado'}
 
-Incluye exactamente 3 prioridades y 3-4 variables críticas.`
+IMPORTANTE: Exactamente 3 prioridades, 3-4 variables. Solo JSON, nada más.`
 
-  try {
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-3-5-haiku-20241022',
-        max_tokens: 2500,
-        system: systemPrompt,
-        messages: [{ role: 'user', content: userPrompt }],
-      }),
-    })
-
-    const data = await response.json()
-
-    if (!response.ok) {
-      console.error('Anthropic error:', JSON.stringify(data))
-      return res.status(502).json({
-        error: `Error del modelo: ${data?.error?.message || response.status}`
-      })
-    }
-
-    const text = data.content?.map((i) => i.text || '').join('') || ''
-    const clean = text.replace(/```json|```/g, '').trim()
-
-    let parsed
+  for (const model of models) {
     try {
-      parsed = JSON.parse(clean)
-    } catch (e) {
-      console.error('Parse error:', clean)
-      return res.status(422).json({ error: 'El modelo devolvió una respuesta inesperada. Intenta de nuevo.' })
-    }
+      const response = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: 2500,
+          system: systemPrompt,
+          messages: [{ role: 'user', content: userPrompt }],
+        }),
+      })
 
-    return res.status(200).json(parsed)
-  } catch (err) {
-    console.error('Server error:', err.message)
-    return res.status(500).json({ error: `Error interno: ${err.message}` })
+      const data = await response.json()
+
+      if (!response.ok) {
+        // Model not found — try next
+        if (data?.error?.type === 'not_found_error') continue
+        return res.status(502).json({ error: `Error API: ${data?.error?.message || response.status}` })
+      }
+
+      const text = data.content?.map(i => i.text || '').join('') || ''
+      const clean = text.replace(/```json|```/g, '').trim()
+
+      try {
+        const parsed = JSON.parse(clean)
+        return res.status(200).json({ ...parsed, _model: model })
+      } catch {
+        // Bad JSON from this model — try next
+        continue
+      }
+    } catch (err) {
+      continue
+    }
   }
+
+  return res.status(502).json({ error: 'Ningún modelo disponible respondió correctamente. Verifica tu API key y los modelos habilitados en tu workspace.' })
 }
