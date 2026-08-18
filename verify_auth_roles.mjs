@@ -1,10 +1,13 @@
-// Verifica el acceso con contraseña de punta a punta: pantalla de login real, rol admin vs
-// invitada, que invitada no vea Canva/Mi negocio/Panel admin, que sus datos NUNCA se mezclen
-// con los de admin (namespace separado en localStorage), y que invitada jamás pueda usar el
-// HubSpot real de la administradora (aunque el servidor lo tenga configurado).
+// Verifica el acceso con contraseña de punta a punta: pantalla de login real, los 3 roles
+// (admin, admin2 = cuenta propia de Ricardo, invitada), que invitada no vea Canva/Mi
+// negocio/Panel admin (pero admin2 SÍ, mismo nivel que admin — decisión de Angela), que los
+// datos de cada rol NUNCA se mezclen entre sí (namespace separado en localStorage: sin
+// prefijo para admin, "ricardo_" para admin2, "guest_" para invitada), que invitada jamás
+// pueda usar el HubSpot real de la administradora (aunque el servidor lo tenga configurado),
+// y que admin2 SÍ pueda usarlo (mismo nivel que admin).
 //
-// Requiere que dev-server.js corra con ANGIE_ADMIN_PASSWORD/ANGIE_GUEST_PASSWORD/
-// ANGIE_SESSION_SECRET puestas (ver el bash que lanza este script).
+// Requiere que dev-server.js corra con ANGIE_ADMIN_PASSWORD/ANGIE_ADMIN2_PASSWORD/
+// ANGIE_GUEST_PASSWORD/ANGIE_SESSION_SECRET puestas (ver el bash que lanza este script).
 import { chromium } from "playwright";
 
 const BASE = "http://localhost:3000";
@@ -115,6 +118,52 @@ async function freshPage(browser) {
   ok(await page2.locator("#authGate").isVisible(), "tras 'Salir', vuelve a pedir contraseña");
 
   await page2.close();
+
+  console.log("\n9. Nueva sesión (navegador limpio) — login como admin2 (cuenta propia de Ricardo, pedida por Angela)");
+  const page3 = await freshPage(browser);
+  await page3.goto(BASE);
+  await page3.waitForSelector("#authPw", { timeout: 3000 });
+  await page3.fill("#authPw", "clave-ricardo-e2e");
+  await page3.click("#authSubmit");
+  await page3.waitForSelector(".hero", { timeout: 4000 });
+  await page3.waitForFunction(() => document.getElementById("roleBadge").textContent.trim().length > 0, { timeout: 4000 });
+  const badgeTxt3 = await page3.locator("#roleBadge").textContent();
+  ok(badgeTxt3.includes("Ricardo"), `el badge dice Ricardo, no "Admin" a secas (obtuve "${badgeTxt3}") — para que quede claro en pantalla que es la cuenta de Ricardo`);
+  // Angela decidió explícitamente que admin2 tenga el MISMO nivel de permisos que admin —
+  // incluye el Canva y el HubSpot reales de Forward, no una versión restringida.
+  ok(await page3.locator("#wizBtn").isVisible(), "admin2 ve 'Mi negocio' (mismo nivel que admin)");
+  ok(await page3.locator("#adminBtn").isVisible(), "admin2 ve el botón de Panel de administración (mismo nivel que admin)");
+  ok(await page3.locator("#canvaPill").isVisible(), "admin2 ve el pill de Canva REAL de Forward (decisión explícita de Angela)");
+
+  // Como admin2 arranca "desde cero" igual que admin, el wizard se auto-abre la primera vez
+  // (mismo comportamiento, ver public/index.html, con medio segundo de retraso) — esperamos
+  // a que aparezca y lo cerramos para poder seguir probando.
+  const wizardAutoOpenedForRicardo = await page3.waitForSelector("#wizardModal.open", { timeout: 3000 }).then(() => true).catch(() => false);
+  ok(wizardAutoOpenedForRicardo, "a admin2 SÍ se le abre el wizard solo la primera vez (mismo trato que admin, para 'empezar de cero')");
+  if (wizardAutoOpenedForRicardo) {
+    await page3.click("#wizClose");
+    await page3.waitForSelector("#wizardModal.open", { state: "hidden", timeout: 3000 });
+  }
+
+  console.log("\n10. admin2 SÍ puede usar el HubSpot real de Forward sin conectar su propia llave (a diferencia de invitada)");
+  await page3.route("**/api/chat", (r) => r.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ text: `[ENTENDI]\nProyecto de Ricardo.\n\n[AGENTES]\nA1\n\n[PASOS]\n[{"code":"A1","accion":"x","documento":null,"resultado":"y","depende_de":null}]\n\n[ENTREGABLE]\nEntregable de Ricardo.\n\n[APROBACION]\nNada por ahora.\n\n[HUBSPOT]\n{"contact":{"email":"prueba@ricardo.mx"},"deal":{"name":"Prueba Ricardo"}}\n\n[SIGUIENTE]\nListo.` }) }));
+  await page3.fill("#q", "Encargo real de Ricardo");
+  await page3.click("#go");
+  await page3.waitForSelector("#hsBtn", { timeout: 5000 });
+  await page3.click("#hsBtn");
+  await page3.waitForTimeout(400);
+  const hsBtnTxt3 = await page3.locator("#hsBtn").textContent();
+  ok(!/no configurado/i.test(hsBtnTxt3), `a diferencia de invitada, el servidor SÍ dejó a admin2 usar el HubSpot real de Forward (botón dice "${hsBtnTxt3}")`);
+
+  console.log("\n11. Pero los proyectos de Ricardo se guardan aparte — nunca junto a los de admin ni a los de invitada");
+  const ricardoRuns = await page3.evaluate(() => JSON.parse(localStorage.getItem("ricardo_forwardai_runs_v1") || "[]"));
+  const adminKeyInRicardoBrowser = await page3.evaluate(() => localStorage.getItem("forwardai_runs_v1"));
+  const guestKeyInRicardoBrowser = await page3.evaluate(() => localStorage.getItem("guest_forwardai_runs_v1"));
+  ok(ricardoRuns.length === 1 && ricardoRuns[0].request.includes("Ricardo"), `el proyecto de Ricardo quedó en la key CON prefijo ricardo_ (obtuve ${ricardoRuns.length} runs)`);
+  ok(!adminKeyInRicardoBrowser, "en este navegador no existe ninguna key sin prefijo (nunca tocó los datos de la admin principal)");
+  ok(!guestKeyInRicardoBrowser, "y tampoco existe la key de invitada (namespace propio, no comparte con ese tampoco)");
+
+  await page3.close();
   await browser.close();
 
   console.log(failures ? `\n${failures} FALLA(S)` : "\nTODO OK — acceso con contraseña, roles y aislamiento de datos verificados de punta a punta.");
