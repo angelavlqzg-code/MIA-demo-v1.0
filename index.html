@@ -370,6 +370,7 @@
   .wiz-doc-row .dl b{color:var(--ink);display:block;font-size:13px}
   .wiz-doc-row .dfiles{font-size:11.5px;color:var(--teal-lt)}
   .wiz-doc-row input[type=file]{max-width:150px;font-size:11px;color:var(--mut)}
+  .wiz-doc-note{font-size:11.5px;color:var(--mut);line-height:1.5;margin:-4px 0 10px}
   .wiz-nav{display:flex;gap:10px;padding:14px 20px 20px;border-top:1px solid var(--bord)}
   .wiz-nav button{height:44px;border-radius:11px;font-family:var(--disp);font-weight:700;font-size:13.5px;flex:1;transition:.16s}
   .wiz-nav .back{background:var(--bg3);border:1px solid var(--bord2);color:var(--mut)}
@@ -794,7 +795,12 @@ const currentRole=await resolveRole();
 authGate.style.display="none";
 document.body.dataset.role=currentRole; // CSS oculta lo admin-only cuando es "invitada" (ver regla body[data-role="invitada"])
 
-const store=createStore(localStorage, currentRole==="invitada"?"guest_":"");
+// "admin2" (pedida por Angela para dar acceso propio a Ricardo Oviedo, MISMO nivel de
+// permisos que admin —incluye Canva y HubSpot reales de Forward, decisión explícita de
+// Angela—) guarda su wizard/proyectos bajo su PROPIO prefijo, para "empezar de cero" sin
+// heredar ni mezclar la memoria de negocio ya cargada en la cuenta admin principal.
+const NAMESPACE_BY_ROLE={invitada:"guest_",admin2:"ricardo_"};
+const store=createStore(localStorage, NAMESPACE_BY_ROLE[currentRole]||"");
 
 /* Indicador de rol en el header + cerrar sesión (si el acceso con contraseña está activo). */
 (async()=>{
@@ -803,7 +809,8 @@ const store=createStore(localStorage, currentRole==="invitada"?"guest_":"");
   if(!st.configured) return; // modo abierto (sin contraseñas puestas todavía): no se muestra nada
   badge.style.display="inline-flex";
   badge.className="role-badge"+(currentRole==="invitada"?" invitada":"");
-  badge.innerHTML=(currentRole==="invitada"?"👋 Invitada":"🔑 Admin")+` <button type="button" id="logoutBtn">Salir</button>`;
+  const ROLE_LABEL={invitada:"👋 Invitada",admin2:"🔑 Ricardo",admin:"🔑 Admin"};
+  badge.innerHTML=(ROLE_LABEL[currentRole]||"🔑 Admin")+` <button type="button" id="logoutBtn">Salir</button>`;
   document.getElementById("logoutBtn").onclick=async()=>{
     await fetch("/api/auth",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({action:"logout"})});
     location.reload();
@@ -1818,7 +1825,8 @@ function fieldHTML(f,data){
     return `<div class="field"><label>${f.label}${req}</label><div class="opts" data-chips="${f.id}">${f.options.map(o=>`<button type="button" class="opt${chosen.includes(o)?" on":""}" data-v="${esc(o)}">${o}</button>`).join("")}</div></div>`;
   }
   if(f.type==="documents"){
-    return `<div class="field"><label>${f.label}</label>`+DOCUMENT_SLOTS.map(([slot,label])=>{
+    const note=`<div class="wiz-doc-note">Entre todos los documentos subidos caben ${(DOCUMENTS_SAFE_LIMIT_BYTES/1024/1024).toFixed(1)} MB en total (límite real del navegador y del servidor). Si tu archivo pesa más, comprímelo o sube solo las páginas relevantes.</div>`;
+    return `<div class="field"><label>${f.label}</label>`+note+DOCUMENT_SLOTS.map(([slot,label])=>{
       const files=(data.documents[slot]||[]).map(d=>d.name).join(", ");
       return `<div class="wiz-doc-row"><div class="dl"><b>${label}</b>${files?`<span class="dfiles">${esc(files)}</span>`:'<span>Sin archivos</span>'}</div><input type="file" data-doc="${slot}" multiple accept=".pdf,.png,.jpg,.jpeg,.txt,.md,.csv"></div>`;
     }).join("")+`</div>`;
@@ -1858,7 +1866,10 @@ function renderWizStep(){
       inp.addEventListener("change",e=>{
         const slot=inp.dataset.doc; const files=[...e.target.files];
         files.forEach(f=>{
-          if(f.size>9*1048576){alert(`"${f.name}" pesa más de 9 MB.`);return;}
+          // Antes había también un tope fijo de "9 MB por archivo" aquí, aparte del cálculo
+          // acumulado de abajo — dos números distintos en el mismo flujo, confuso (de ahí
+          // salió la pregunta de si el límite real era 9 MB). El único límite real es el
+          // acumulado contra DOCUMENTS_SAFE_LIMIT_BYTES, que ya explica todo lo necesario.
           if(estimateDocumentsBytes(wizardData)+f.size>DOCUMENTS_SAFE_LIMIT_BYTES){
             alert(`"${f.name}" no se adjuntó: entre todos los documentos ya suman casi el límite que tu navegador permite guardar (${Math.round(DOCUMENTS_SAFE_LIMIT_BYTES/1024/1024)} MB en total). Quita alguno o usa una versión más ligera de este archivo.`);
             return;
@@ -2459,11 +2470,12 @@ async function renderAdminPanel(){
   }catch(e){ clickEl.querySelector("b").textContent="—"; }
 }
 
-/* Auto-abre el wizard la primera vez que alguien entra sin configuración guardada — solo
-   para admin, para no ser intrusivos con quien solo está probando la app. Invitada SÍ puede
-   abrirlo cuando quiera con el botón "Mi negocio" (ya visible para su rol, ver CSS arriba);
-   solo no se le fuerza a verlo apenas entra. */
-if(currentRole==="admin" && !store.loadWizardData()) setTimeout(openWizard, 500);
+/* Auto-abre el wizard la primera vez que alguien entra sin configuración guardada — para
+   admin y admin2 (Ricardo también arranca desde cero, ver NAMESPACE_BY_ROLE arriba), para no
+   ser intrusivos con quien solo está probando la app. Invitada SÍ puede abrirlo cuando quiera
+   con el botón "Mi negocio" (ya visible para su rol, ver CSS arriba); solo no se le fuerza a
+   verlo apenas entra. */
+if((currentRole==="admin"||currentRole==="admin2") && !store.loadWizardData()) setTimeout(openWizard, 500);
 </script>
 </body>
 </html>
